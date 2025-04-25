@@ -1,35 +1,63 @@
-import React, { useEffect } from "react";
+// Game.js
+import React, { useEffect, useState } from "react";
 import Phaser from "phaser";
-import GameScene from "../phaser/GameScene"; // Import your GameScene
+import GameScene from "../phaser/GameScene";
+import ChatBox from "./chatbox";
+import VoiceChat from "./voiceChat";
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:5000"); // adjust if deployed
 
 const Game = () => {
+  const [atTable, setAtTable] = useState(false);
+
   useEffect(() => {
-    // Check if Phaser game already exists
     if (window.game) return;
 
-    // Phaser game configuration
     const config = {
       type: Phaser.AUTO,
-      width: 800,
-      height: 600,
-      parent: "game-container", // This is where Phaser will render the game
+      scale: {
+        mode: Phaser.Scale.RESIZE,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+      },
+      parent: "game-container",
       physics: {
         default: "arcade",
         arcade: { debug: false },
       },
-      scene: [GameScene], // Load GameScene.js
+      scene: [GameScene],
     };
 
-    // Create Phaser game
+    // Make socket globally available to Phaser
+    window.socket = socket;
+
     window.game = new Phaser.Game(config);
+
+    const handleTableStatusChange = () =>
+      setAtTable(window.gameState?.atTable || false);
+
+    window.addEventListener("tableStatusChange", handleTableStatusChange);
 
     return () => {
       window.game.destroy(true);
       window.game = null;
+      window.removeEventListener("tableStatusChange", handleTableStatusChange);
     };
   }, []);
 
-  return <div id="game-container" style={{ width: "100%", height: "100%" }} />;
+  return (
+    <div
+      id="game-container"
+      style={{ width: "100vw", height: "100vh", position: "relative" }}
+    >
+      {atTable && (
+        <div style={{ position: "absolute", bottom: "20px", right: "20px" }}>
+          <ChatBox />
+          <VoiceChat />
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default Game;

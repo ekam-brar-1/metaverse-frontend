@@ -3,45 +3,96 @@ import Phaser from "phaser";
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: "GameScene" });
+    this.isAtTable = false;
+    this.remotePlayers = {}; // ✅ Store other players by socket ID
   }
 
   preload() {
-    // Load assets
-    this.load.image("table", "/assets/table.png"); // Table image
+    this.load.image("table", "/assets/table.png");
     this.load.spritesheet("player", "assets/character.png", {
-      frameWidth: 17, // Adjust according to sprite size
+      frameWidth: 17,
       frameHeight: 18,
     });
-    this.load.image("background", "/assets/preview.jpg"); // Background image
+    this.load.image("background", "/assets/preview.jpg");
   }
 
-  create() {
-    // Add background
-    this.add.image(400, 300, "background").setScale(2).setDepth(-1);
+create() {
+  this.add.image(400, 300, "background").setScale(2).setDepth(-1);
+  window.gameState = { atTable: false };
 
-    // Add table as a physics object (so it has collision)
-    this.table = this.physics.add.staticImage(400, 300, "table").setScale(3);
+  this.table = this.physics.add.staticImage(400, 300, "table").setScale(3);
 
-    // Add player with physics and enable collisions
-    this.player = this.physics.add
-      .sprite(17, 18, "player")
-      .setScale(2)
-      .setCollideWorldBounds(true);
+  this.player = this.physics.add
+    .sprite(400, 200, "player")
+    .setScale(2)
+    .setCollideWorldBounds(true);
 
-    // Enable collision between player and table
-    this.physics.add.collider(this.player, this.table);
+  this.physics.add.collider(this.player, this.table);
 
-    // Set up character animations
-    this.anims.create({
-      key: "walk-down",
-      frames: this.anims.generateFrameNumbers("player", { start: 0, end: 3 }),
-      frameRate: 10,
-      repeat: -1,
-    });
+  this.anims.create({
+    key: "walk-down",
+    frames: this.anims.generateFrameNumbers("player", { start: 0, end: 3 }),
+    frameRate: 10,
+    repeat: -1,
+  });
+  this.anims.create({
+    key: "walk-left",
+    frames: this.anims.generateFrameNumbers("player", { start: 4, end: 7 }),
+    frameRate: 10,
+    repeat: -1,
+  });
+  this.anims.create({
+    key: "walk-right",
+    frames: this.anims.generateFrameNumbers("player", { start: 8, end: 11 }),
+    frameRate: 10,
+    repeat: -1,
+  });
+  this.anims.create({
+    key: "walk-up",
+    frames: this.anims.generateFrameNumbers("player", { start: 12, end: 15 }),
+    frameRate: 10,
+    repeat: -1,
+  });
 
-    // Keyboard input for movement
-    this.cursors = this.input.keyboard.createCursorKeys();
-  }
+  this.cursors = this.input.keyboard.createCursorKeys();
+
+  // ✅ Add this line to prevent crash
+  this.remotePlayers = {};
+
+  window.socket.emit("join-room", "global");
+
+  window.socket.on("connect", () => {
+    this.mySocketId = window.socket.id;
+  });
+
+  window.socket.on("players-update", (players) => {
+    if (!this.mySocketId) return;
+
+    for (const id in players) {
+      const { x, y } = players[id];
+
+      if (id === this.mySocketId) continue;
+
+      if (this.remotePlayers[id]) {
+        this.remotePlayers[id].x = x;
+        this.remotePlayers[id].y = y;
+      } else {
+        const sprite = this.add.sprite(x, y, "player").setScale(2);
+        this.remotePlayers[id] = sprite;
+      }
+    }
+
+    // Cleanup removed players
+    for (const id in this.remotePlayers) {
+      if (!players[id]) {
+        this.remotePlayers[id].destroy();
+        delete this.remotePlayers[id];
+      }
+    }
+  });
+}
+
+
 
   update() {
     const speed = 150;
@@ -62,12 +113,45 @@ class GameScene extends Phaser.Scene {
     } else {
       this.player.anims.stop();
     }
+
+    this.checkPlayerTableCollision();
+
+    // 🔄 Emit position when moved enough
+    const { x, y } = this.player;
+    if (
+      !this.lastSentPosition ||
+      Phaser.Math.Distance.Between(x, y, this.lastSentPosition.x, this.lastSentPosition.y) > 5
+    ) {
+      window.socket.emit("player-move", { x, y });
+      this.lastSentPosition = { x, y };
+    }
+  }
+
+  checkPlayerTableCollision() {
+    const playerBounds = this.player.getBounds();
+    const tableBounds = this.table.getBounds();
+
+    if (Phaser.Geom.Intersects.RectangleToRectangle(playerBounds, tableBounds)) {
+      if (!this.isAtTable) {
+        this.isAtTable = true;
+        this.enterTable();
+      }
+    } else {
+      if (this.isAtTable) {
+        this.isAtTable = false;
+        this.leaveTable();
+      }
+    }
   }
 
   enterTable() {
-    console.log("Player reached the table!");
-    // Trigger chat or voice features when near the table
-    this.scene.scene.events.emit("playerJoinedTable");
+    window.gameState.atTable = true;
+    window.dispatchEvent(new Event("tableStatusChange"));
+  }
+
+  leaveTable() {
+    window.gameState.atTable = false;
+    window.dispatchEvent(new Event("tableStatusChange"));
   }
 }
 
