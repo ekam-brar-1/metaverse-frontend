@@ -20,6 +20,9 @@ create() {
   this.add.image(400, 300, "background").setScale(2).setDepth(-1);
   window.gameState = { atTable: false };
 
+this.mySocketId = null;
+this.pendingPlayers = null;
+
   this.table = this.physics.add.staticImage(400, 300, "table").setScale(3);
 
   this.player = this.physics.add
@@ -59,37 +62,25 @@ create() {
   // ✅ Add this line to prevent crash
   this.remotePlayers = {};
 
-  window.socket.emit("join-room", "global");
+window.socket.emit("join-room", "global");
 
-  window.socket.on("connect", () => {
-    this.mySocketId = window.socket.id;
-  });
+window.socket.on("connect", () => {
+  this.mySocketId = window.socket.id;
 
-  window.socket.on("players-update", (players) => {
-    if (!this.mySocketId) return;
+  // Process any buffered updates
+  if (this.pendingPlayers) {
+    this.handlePlayersUpdate(this.pendingPlayers);
+    this.pendingPlayers = null;
+  }
+});
 
-    for (const id in players) {
-      const { x, y } = players[id];
-
-      if (id === this.mySocketId) continue;
-
-      if (this.remotePlayers[id]) {
-        this.remotePlayers[id].x = x;
-        this.remotePlayers[id].y = y;
-      } else {
-        const sprite = this.add.sprite(x, y, "player").setScale(2);
-        this.remotePlayers[id] = sprite;
-      }
-    }
-
-    // Cleanup removed players
-    for (const id in this.remotePlayers) {
-      if (!players[id]) {
-        this.remotePlayers[id].destroy();
-        delete this.remotePlayers[id];
-      }
-    }
-  });
+window.socket.on("players-update", (players) => {
+  if (!this.mySocketId) {
+    this.pendingPlayers = players;
+    return;
+  }
+  this.handlePlayersUpdate(players);
+});
 }
 
 
@@ -143,6 +134,39 @@ create() {
       }
     }
   }
+handlePlayersUpdate(players) {
+  console.log("📦 players-update received:", players);
+  console.log("🧠 mySocketId:", this.mySocketId);
+
+  for (const id in players) {
+    const { x, y } = players[id];
+
+    if (id === this.mySocketId) {
+      console.log("🛑 Skipping my own player:", id);
+      continue;
+    }
+
+    console.log("👤 Rendering other player:", id, "at", x, y);
+
+    if (this.remotePlayers[id]) {
+      this.remotePlayers[id].x = x;
+      this.remotePlayers[id].y = y;
+    } else {
+      console.log("✨ Creating new sprite for:", id);
+      const sprite = this.add.sprite(x, y, "player").setScale(2);
+      this.remotePlayers[id] = sprite;
+    }
+  }
+
+  for (const id in this.remotePlayers) {
+    if (!players[id]) {
+      this.remotePlayers[id].destroy();
+      delete this.remotePlayers[id];
+    }
+  }
+}
+
+
 
   enterTable() {
     window.gameState.atTable = true;
